@@ -13,7 +13,7 @@ export DISPLAY=:99
 echo "Display: $DISPLAY"
 
 # Iniciar VNC
-x11vnc -display :99 -nopw -listen 0.0.0.0 -xkb -forever -noxdamage &
+x11vnc -display :99 -passwd ${VNC_PASSWORD} -listen 0.0.0.0 -xkb -forever -noxdamage &
 sleep 2
 
 # Iniciar noVNC
