@@ -1,21 +1,16 @@
 #!/bin/bash
 set -e
 
-# Iniciar display virtual
 Xvfb :99 -screen 0 1024x768x16 &
 sleep 3
 
-# Iniciar VNC para ver la interfaz
 x11vnc -display :99 -nopw -listen 0.0.0.0 -xkb -forever &
 
-# Iniciar noVNC (acceso por navegador)
 websockify --web /usr/share/novnc 6080 localhost:5900 &
 
-# Inicializar Wine
 winecfg /v win10 2>/dev/null || true
 sleep 5
 
-# Instalar MT5 si no está instalado
 MT5_EXE="$HOME/.wine/drive_c/Program Files/MetaTrader 5/terminal64.exe"
 
 if [ ! -f "$MT5_EXE" ]; then
@@ -24,6 +19,5 @@ if [ ! -f "$MT5_EXE" ]; then
     sleep 30
 fi
 
-# Arrancar MT5
 echo "Iniciando MetaTrader 5..."
 wine "$MT5_EXE"
