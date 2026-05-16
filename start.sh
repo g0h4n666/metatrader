@@ -4,7 +4,7 @@
 rm -f /tmp/.X99-lock /tmp/.X11-unix/X99
 
 # Iniciar display virtual
-Xvfb :99 -screen 0 1024x768x24 &
+Xvfb :99 -screen 0 1920x1080x24 &
 sleep 5
 
 # Exportar display - CRÍTICO para Wine
