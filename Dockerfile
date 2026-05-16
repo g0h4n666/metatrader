@@ -33,5 +33,6 @@ COPY start.sh /start.sh
 RUN chmod +x /start.sh
 
 EXPOSE 5900 6080
-
+ENV WINEPREFIX=/root/.wine
+ENV WINEDEBUG=-all
 CMD ["/start.sh"]
