@@ -1,0 +1,368 @@
+{
+  "name": "BTC Trading Agent — Claude + MT5",
+  "nodes": [
+    {
+      "parameters": { "mode": "chat" },
+      "id": "chat-trigger",
+      "name": "Chat Trigger",
+      "type": "@n8n/n8n-nodes-langchain.chatTrigger",
+      "typeVersion": 1,
+      "position": [80, 280],
+      "webhookId": "btc-chat-001"
+    },
+    {
+      "parameters": {
+        "agent": "conversationalAgent",
+        "promptType": "define",
+        "text": "={{ $json.chatInput }}",
+        "options": {
+          "systemMessage": "Eres un agente experto en trading de Bitcoin. Tienes herramientas para consultar el precio en tiempo real, calcular indicadores técnicos y ejecutar órdenes en MetaTrader 5. Cuando el usuario pida análisis: 1) consulta el precio actual, 2) calcula los indicadores, 3) decide COMPRAR/VENDER/ESPERAR con confianza 1-10, 4) si confianza >= 7 ejecuta la orden automáticamente. Responde siempre en español. Explica brevemente tu razonamiento."
+        }
+      },
+      "id": "ai-agent",
+      "name": "AI Agent (Claude)",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.6,
+      "position": [320, 280]
+    },
+    {
+      "parameters": {
+        "model": "claude-sonnet-4-6",
+        "options": { "temperature": 0.3, "maxTokensToSample": 1000 }
+      },
+      "id": "claude-model",
+      "name": "Claude Sonnet",
+      "type": "@n8n/n8n-nodes-langchain.lmChatAnthropic",
+      "typeVersion": 1.2,
+      "position": [200, 480],
+      "credentials": {
+        "anthropicApi": {
+          "id": "REEMPLAZA_CON_TU_CREDENTIAL_ID",
+          "name": "Anthropic API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "name": "consultar_precio_btc",
+        "description": "Consulta el precio actual de Bitcoin en USD desde CoinGecko. Retorna precio, cambio 24h y volumen. Úsala siempre antes de analizar el mercado.",
+        "method": "GET",
+        "url": "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd&include_24hr_change=true&include_24hr_vol=true",
+        "options": {}
+      },
+      "id": "tool-precio",
+      "name": "Tool: Precio BTC",
+      "type": "@n8n/n8n-nodes-langchain.toolHttpRequest",
+      "typeVersion": 1.1,
+      "position": [80, 480]
+    },
+    {
+      "parameters": {
+        "name": "verificar_estado_mt5",
+        "description": "Verifica si MetaTrader 5 está activo y listo para recibir órdenes.",
+        "method": "GET",
+        "url": "http://metatrader.railway.internal:8080/estado",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "X-API-Key", "value": "={{ $env.MT5_API_KEY }}" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "tool-estado",
+      "name": "Tool: Estado MT5",
+      "type": "@n8n/n8n-nodes-langchain.toolHttpRequest",
+      "typeVersion": 1.1,
+      "position": [340, 480]
+    },
+    {
+      "parameters": {
+        "name": "ejecutar_orden_mt5",
+        "description": "Ejecuta una orden de compra o venta en MetaTrader 5. Úsala solo cuando la confianza sea 7 o mayor. Parámetros: accion (COMPRAR/VENDER/ESPERAR), simbolo (BTCUSD), lote (0.01 por defecto), sl_pips (stop loss en pips), tp_pips (take profit en pips), confianza (1-10).",
+        "method": "POST",
+        "url": "http://metatrader.railway.internal:8080/orden",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "X-API-Key", "value": "={{ $env.MT5_API_KEY }}" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "accion",    "value": "={{ $fromAI('accion') }}" },
+            { "name": "simbolo",   "value": "BTCUSD" },
+            { "name": "lote",      "value": "0.01" },
+            { "name": "sl_pips",   "value": "50" },
+            { "name": "tp_pips",   "value": "100" },
+            { "name": "confianza", "value": "={{ $fromAI('confianza') }}" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "tool-orden",
+      "name": "Tool: Ejecutar Orden MT5",
+      "type": "@n8n/n8n-nodes-langchain.toolHttpRequest",
+      "typeVersion": 1.1,
+      "position": [560, 480]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "senal-btc",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook — Señal externa",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [80, 720],
+      "webhookId": "senal-btc-001"
+    },
+    {
+      "parameters": {
+        "url": "https://api.coingecko.com/api/v3/simple/price",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "ids",               "value": "bitcoin" },
+            { "name": "vs_currencies",     "value": "usd" },
+            { "name": "include_24hr_change","value": "true" },
+            { "name": "include_24hr_vol",  "value": "true" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "http-coingecko-webhook",
+      "name": "HTTP — Precio BTC",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [320, 720]
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.first().json;\nconst precio    = data.bitcoin.usd;\nconst cambio24h = data.bitcoin.usd_24h_change;\nconst volumen   = data.bitcoin.usd_24h_vol;\n\nlet rsi = 50;\nif      (cambio24h > 15)  rsi = 90;\nelse if (cambio24h > 10)  rsi = 82;\nelse if (cambio24h > 5)   rsi = 72;\nelse if (cambio24h > 2)   rsi = 62;\nelse if (cambio24h > 0)   rsi = 55;\nelse if (cambio24h > -2)  rsi = 45;\nelse if (cambio24h > -5)  rsi = 38;\nelse if (cambio24h > -10) rsi = 28;\nelse                      rsi = 18;\n\nlet tendencia = 'NEUTRAL';\nif      (cambio24h >  8)  tendencia = 'FUERTEMENTE ALCISTA';\nelse if (cambio24h >  3)  tendencia = 'ALCISTA';\nelse if (cambio24h < -8)  tendencia = 'FUERTEMENTE BAJISTA';\nelse if (cambio24h < -3)  tendencia = 'BAJISTA';\n\nlet señal = 'ESPERAR', confianza = 5;\nif      (rsi < 20) { señal = 'COMPRAR'; confianza = 9; }\nelse if (rsi < 30) { señal = 'COMPRAR'; confianza = 8; }\nelse if (rsi > 80) { señal = 'VENDER';  confianza = 9; }\nelse if (rsi > 70) { señal = 'VENDER';  confianza = 7; }\n\nreturn [{ json: {\n  precio_btc:  precio,\n  cambio_24h:  parseFloat(cambio24h.toFixed(2)),\n  volumen_24h: Math.round(volumen),\n  rsi_estimado: rsi,\n  tendencia,\n  señal,\n  confianza,\n  timestamp: new Date().toISOString()\n}}];"
+      },
+      "id": "code-indicadores",
+      "name": "Code — Indicadores",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [560, 720]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": false },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue":  "={{ $json.señal }}",
+              "rightValue": "ESPERAR",
+              "operator": { "type": "string", "operation": "notEquals" }
+            },
+            {
+              "id": "c2",
+              "leftValue":  "={{ $json.confianza }}",
+              "rightValue": 7,
+              "operator": { "type": "number", "operation": "gte" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-decision",
+      "name": "IF — Señal válida?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [800, 720]
+    },
+    {
+      "parameters": {
+        "url": "http://metatrader.railway.internal:8080/orden",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "X-API-Key",     "value": "={{ $env.MT5_API_KEY }}" },
+            { "name": "Content-Type",  "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"accion\":    \"{{ $json.señal }}\",\n  \"simbolo\":   \"BTCUSD\",\n  \"lote\":      0.01,\n  \"sl_pips\":   50,\n  \"tp_pips\":   100,\n  \"confianza\": {{ $json.confianza }}\n}",
+        "options": {}
+      },
+      "id": "http-mt5-orden",
+      "name": "HTTP — Orden MT5",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1040, 640]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $env.TELEGRAM_CHAT_ID }}",
+        "text": "=🤖 *BTC Bot — Señal detectada*\n\n💰 Precio: ${{ $json.precio_btc.toLocaleString() }}\n📊 Cambio 24h: {{ $json.cambio_24h }}%\n📉 RSI: {{ $json.rsi_estimado }}\n🎯 Tendencia: {{ $json.tendencia }}\n\n⚡ *{{ $json.señal }}* — Confianza {{ $json.confianza }}/10\n🕐 {{ $json.timestamp }}",
+        "additionalFields": { "parse_mode": "Markdown" }
+      },
+      "id": "telegram-señal",
+      "name": "Telegram — Alerta",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1040, 800],
+      "credentials": {
+        "telegramApi": {
+          "id": "REEMPLAZA_CON_TU_CREDENTIAL_ID",
+          "name": "Telegram Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "minutes", "minutesInterval": 5 }]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "Schedule — Cada 5 min",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [80, 960]
+    },
+    {
+      "parameters": {
+        "url": "https://api.coingecko.com/api/v3/simple/price",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "ids",                "value": "bitcoin" },
+            { "name": "vs_currencies",      "value": "usd" },
+            { "name": "include_24hr_change", "value": "true" },
+            { "name": "include_24hr_vol",   "value": "true" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "http-auto-precio",
+      "name": "HTTP — Precio automático",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [320, 960]
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.first().json;\nconst precio    = data.bitcoin.usd;\nconst cambio24h = data.bitcoin.usd_24h_change;\n\nlet rsi = 50;\nif      (cambio24h > 15)  rsi = 90;\nelse if (cambio24h > 10)  rsi = 82;\nelse if (cambio24h > 5)   rsi = 72;\nelse if (cambio24h > 2)   rsi = 62;\nelse if (cambio24h > 0)   rsi = 55;\nelse if (cambio24h > -2)  rsi = 45;\nelse if (cambio24h > -5)  rsi = 38;\nelse if (cambio24h > -10) rsi = 28;\nelse                      rsi = 18;\n\nlet tendencia = 'NEUTRAL';\nif      (cambio24h >  8)  tendencia = 'FUERTEMENTE ALCISTA';\nelse if (cambio24h >  3)  tendencia = 'ALCISTA';\nelse if (cambio24h < -8)  tendencia = 'FUERTEMENTE BAJISTA';\nelse if (cambio24h < -3)  tendencia = 'BAJISTA';\n\nlet señal = 'ESPERAR', confianza = 5;\nif      (rsi < 20) { señal = 'COMPRAR'; confianza = 9; }\nelse if (rsi < 30) { señal = 'COMPRAR'; confianza = 8; }\nelse if (rsi > 80) { señal = 'VENDER';  confianza = 9; }\nelse if (rsi > 70) { señal = 'VENDER';  confianza = 7; }\n\nreturn [{ json: {\n  precio_btc:   precio,\n  cambio_24h:   parseFloat(cambio24h.toFixed(2)),\n  rsi_estimado: rsi,\n  tendencia,\n  señal,\n  confianza,\n  timestamp: new Date().toISOString()\n}}];"
+      },
+      "id": "code-auto",
+      "name": "Code — Indicadores automáticos",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [560, 960]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": false },
+          "conditions": [
+            {
+              "id": "ca1",
+              "leftValue":  "={{ $json.señal }}",
+              "rightValue": "ESPERAR",
+              "operator": { "type": "string", "operation": "notEquals" }
+            },
+            {
+              "id": "ca2",
+              "leftValue":  "={{ $json.confianza }}",
+              "rightValue": 7,
+              "operator": { "type": "number", "operation": "gte" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-auto",
+      "name": "IF — Auto señal válida?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [800, 960]
+    },
+    {
+      "parameters": {
+        "url": "http://metatrader.railway.internal:8080/orden",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "X-API-Key",    "value": "={{ $env.MT5_API_KEY }}" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"accion\":    \"{{ $json.señal }}\",\n  \"simbolo\":   \"BTCUSD\",\n  \"lote\":      0.01,\n  \"sl_pips\":   50,\n  \"tp_pips\":   100,\n  \"confianza\": {{ $json.confianza }}\n}",
+        "options": {}
+      },
+      "id": "http-auto-mt5",
+      "name": "HTTP — Auto orden MT5",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1040, 880]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $env.TELEGRAM_CHAT_ID }}",
+        "text": "=🤖 *[AUTO] BTC Bot*\n💰 ${{ $json.precio_btc.toLocaleString() }} | {{ $json.cambio_24h }}%\n📊 RSI: {{ $json.rsi_estimado }} | {{ $json.tendencia }}\n⚡ *{{ $json.señal }}* ({{ $json.confianza }}/10)\n🕐 {{ $json.timestamp }}",
+        "additionalFields": { "parse_mode": "Markdown" }
+      },
+      "id": "telegram-auto",
+      "name": "Telegram — Auto alerta",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1040, 1040],
+      "credentials": {
+        "telegramApi": {
+          "id": "REEMPLAZA_CON_TU_CREDENTIAL_ID",
+          "name": "Telegram Bot"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Chat Trigger":              { "main": [[{ "node": "AI Agent (Claude)", "type": "main", "index": 0 }]] },
+    "Claude Sonnet":             { "ai_languageModel": [[{ "node": "AI Agent (Claude)", "type": "ai_languageModel", "index": 0 }]] },
+    "Tool: Precio BTC":          { "ai_tool": [[{ "node": "AI Agent (Claude)", "type": "ai_tool", "index": 0 }]] },
+    "Tool: Estado MT5":          { "ai_tool": [[{ "node": "AI Agent (Claude)", "type": "ai_tool", "index": 0 }]] },
+    "Tool: Ejecutar Orden MT5":  { "ai_tool": [[{ "node": "AI Agent (Claude)", "type": "ai_tool", "index": 0 }]] },
+    "Webhook — Señal externa":   { "main": [[{ "node": "HTTP — Precio BTC",   "type": "main", "index": 0 }]] },
+    "HTTP — Precio BTC":         { "main": [[{ "node": "Code — Indicadores",  "type": "main", "index": 0 }]] },
+    "Code — Indicadores":        { "main": [[{ "node": "IF — Señal válida?",  "type": "main", "index": 0 }]] },
+    "IF — Señal válida?": {
+      "main": [
+        [{ "node": "HTTP — Orden MT5", "type": "main", "index": 0 }],
+        [{ "node": "Telegram — Alerta","type": "main", "index": 0 }]
+      ]
+    },
+    "HTTP — Orden MT5":          { "main": [[{ "node": "Telegram — Alerta",   "type": "main", "index": 0 }]] },
+    "Schedule — Cada 5 min":     { "main": [[{ "node": "HTTP — Precio automático", "type": "main", "index": 0 }]] },
+    "HTTP — Precio automático":  { "main": [[{ "node": "Code — Indicadores automáticos", "type": "main", "index": 0 }]] },
+    "Code — Indicadores automáticos": { "main": [[{ "node": "IF — Auto señal válida?", "type": "main", "index": 0 }]] },
+    "IF — Auto señal válida?": {
+      "main": [
+        [{ "node": "HTTP — Auto orden MT5",  "type": "main", "index": 0 }],
+        [{ "node": "Telegram — Auto alerta", "type": "main", "index": 0 }]
+      ]
+    },
+    "HTTP — Auto orden MT5":     { "main": [[{ "node": "Telegram — Auto alerta", "type": "main", "index": 0 }]] }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": ""
+  },
+  "staticData": null,
+  "tags": ["trading", "btc", "mt5", "claude"],
+  "meta": { "instanceId": "btc-trading-agent-v1" }
+}
